@@ -27,7 +27,7 @@ class JDAnalysis(BaseModel):
     required_skills: list[str]
     nice_to_have_skills: list[str]
     experience_level: str          # junior / mid / senior / principal
-    years_experience_required: int
+    years_experience_required: Optional[int] = None
     key_responsibilities: list[str]
     tech_stack: list[str]
     domain: str                    # e.g. fintech, healthtech, AI

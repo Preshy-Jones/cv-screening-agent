@@ -1,4 +1,5 @@
 import json
+import re
 from anthropic import Anthropic
 from models.schemas import AgentState, JDAnalysis
 
@@ -40,6 +41,7 @@ Return ONLY a JSON object with this exact structure, no other text:
         raw = re.sub(r'\n?```$', '', raw)
 
     jd_data = json.loads(raw)
+    jd_data.setdefault("years_experience_required", None)
 
     # Validate against schema
     JDAnalysis(**jd_data)
