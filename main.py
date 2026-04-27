@@ -54,7 +54,7 @@ async def screen_cv(
 
     # Run through all 4 agents
     print("\n🚀 Starting CV screening workflow...\n")
-    final_state = screening_workflow.invoke(initial_state)
+    final_state = await screening_workflow.ainvoke(initial_state)
     final_state_data = _state_to_dict(final_state)
     print("\n✅ Workflow complete!\n")
 
@@ -84,7 +84,7 @@ async def screen_cv_text(payload: dict):
     )
 
     print("\n🚀 Starting CV screening workflow...\n")
-    final_state = screening_workflow.invoke(initial_state)
+    final_state = await screening_workflow.ainvoke(initial_state)
     final_state_data = _state_to_dict(final_state)
     print("\n✅ Workflow complete!\n")
 
