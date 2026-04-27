@@ -1,66 +1,77 @@
-import json
-import re
-from anthropic import Anthropic
-from models.schemas import AgentState, GapAnalysis
-
-client = Anthropic()
-
-def gap_analyser_agent(state: AgentState) -> AgentState:
-    print("⚖️  Agent 3: Analysing gaps...")
-
-    prompt = f"""
-You are a senior engineering hiring manager. Compare this candidate's 
-profile against the job requirements and produce an honest gap analysis.
-
-JOB REQUIREMENTS:
-{json.dumps(state.jd_analysis, indent=2)}
-
-CANDIDATE PROFILE:
-{json.dumps(state.cv_analysis, indent=2)}
-
-Be honest and specific. Do not inflate the match score.
-
-Return ONLY a JSON object with this exact structure, no other text:
-{{
-    "match_score": 75,
-    "strong_matches": [
-        "5+ years Python matches requirement",
-        "FastAPI experience directly relevant"
-    ],
-    "gaps": [
-        "No Playwright experience — central to role",
-        "No Elixir experience"
-    ],
-    "nice_to_have_matches": [
-        "LLM orchestration experience is a bonus"
-    ],
-    "recommendation": "APPLY"
-}}
-
-Recommendation must be one of:
-- STRONG_APPLY (85+ score, most requirements met)
-- APPLY (65-84 score, core requirements met, gaps are learnable)
-- STRETCH (45-64 score, significant gaps but worth trying)
-- SKIP (below 45, too many critical gaps)
-"""
-
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=1000,
-        messages=[{"role": "user", "content": prompt}]
-    )
-
-    raw = response.content[0].text.strip()
-
-    if raw.startswith("```"):
-        raw = re.sub(r'^```[a-z]*\n?', '', raw)
-        raw = re.sub(r'\n?```$', '', raw)
-
-    gap_data = json.loads(raw)
-    GapAnalysis(**gap_data)
-
-    state.gap_analysis = gap_data
-    print(f"✅ Gap Analysis complete. "
-          f"Score: {gap_data['match_score']}/100, "
-          f"Recommendation: {gap_data['recommendation']}")
+async def gap_analyser_agent(state: AgentState) -> AgentState:
+    required_skills = state.jd_analysis["required_skills"]
+    cv_skills = state.cv_analysis["skills"]
+    cv_text = state.cv_text
+    
+    # Embed all required skills at once — one API call
+    skill_embeddings = client.embeddings.create(
+        input=required_skills,
+        model="text-embedding-3-small"
+    ).data
+    
+    # Embed all CV skills at once — one API call
+    cv_skill_embeddings = client.embeddings.create(
+        input=cv_skills,
+        model="text-embedding-3-small"
+    ).data
+    
+    gaps = []
+    matches = []
+    
+    for i, required_skill in enumerate(required_skills):
+        req_vector = skill_embeddings[i].embedding
+        
+        # Check similarity against every CV skill
+        best_match = None
+        best_score = 0
+        
+        for j, cv_skill in enumerate(cv_skills):
+            cv_vector = cv_skill_embeddings[j].embedding
+            score = cosine_similarity(req_vector, cv_vector)
+            
+            if score > best_score:
+                best_score = score
+                best_match = cv_skill
+        
+        if best_score > 0.85:
+            matches.append({
+                "required": required_skill,
+                "matched_to": best_match,
+                "confidence": best_score
+            })
+        elif best_score > 0.70:
+            # Possible match — check against full CV text too
+            # Maybe it's described differently in a bullet point
+            cv_text_embedding = client.embeddings.create(
+                input=cv_text[:3000],
+                model="text-embedding-3-small"
+            ).data[0].embedding
+            
+            text_score = cosine_similarity(req_vector, cv_text_embedding)
+            
+            if text_score > 0.75:
+                matches.append({
+                    "required": required_skill,
+                    "matched_to": "implicit in CV text",
+                    "confidence": text_score
+                })
+            else:
+                gaps.append(required_skill)
+        else:
+            gaps.append(required_skill)
+    
+    match_score = int(len(matches) / len(required_skills) * 100)
+    
+    state.gap_analysis = {
+        "strong_matches": matches,
+        "gaps": gaps,
+        "match_score": match_score,
+        "recommendation": (
+            "STRONG_APPLY" if match_score >= 85 else
+            "APPLY" if match_score >= 65 else
+            "STRETCH" if match_score >= 45 else
+            "SKIP"
+        )
+    }
+    
     return state
